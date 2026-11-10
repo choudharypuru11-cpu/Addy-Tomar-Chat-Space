@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Private Group Chat</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+
+  <!-- TOP NAV -->
+  <header class="bg-slate-800 border-b border-slate-700 px-6 py-4 flex justify-between items-center shadow-md">
+    <div class="flex items-center space-x-3">
+      <div class="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></div>
+      <h1 class="text-xl font-bold tracking-wide">Private Group Chat</h1>
+    </div>
+    <div id="navRight" class="hidden flex items-center gap-4">
+      <span id="badgeUser" class="text-sm bg-slate-700 px-3 py-1 rounded-full text-slate-300"></span>
+      <button id="adminTabBtn" onclick="switchView('admin')" class="hidden bg-indigo-600 hover:bg-indigo-700 text-xs font-semibold px-3 py-2 rounded-lg transition">Admin Panel</button>
+      <button id="chatTabBtn" onclick="switchView('chat')" class="hidden bg-emerald-600 hover:bg-emerald-700 text-xs font-semibold px-3 py-2 rounded-lg transition">Back to Chat</button>
+      <button onclick="logout()" class="bg-rose-600 hover:bg-rose-700 text-xs font-semibold px-3 py-2 rounded-lg transition">Logout</button>
+    </div>
+  </header>
+
+  <!-- SCREEN 1: LOGIN -->
+  <main id="loginView" class="flex-1 flex items-center justify-center p-4">
+    <div class="bg-slate-800 p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-700">
+      <h2 class="text-2xl font-bold mb-2 text-center text-white">Sign In</h2>
+      <p class="text-xs text-slate-400 text-center mb-6">Access is strictly restricted to invitees and admin.</p>
+      
+      <form id="loginForm" onsubmit="handleLogin(event)" class="space-y-4">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">Username / ID</label>
+          <input type="text" id="loginUsername" required class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-indigo-500">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">Password</label>
+          <input type="password" id="loginPassword" required class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-indigo-500">
+        </div>
+        <p id="loginError" class="text-rose-500 text-xs hidden"></p>
+        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 font-semibold py-2.5 rounded-lg transition">Enter Chat</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- SCREEN 2: GROUP CHAT -->
+  <main id="chatView" class="hidden flex-1 flex flex-col h-[calc(100vh-73px)] max-w-4xl w-full mx-auto p-4">
+    <div id="chatMessages" class="flex-1 overflow-y-auto space-y-3 p-4 bg-slate-800/60 rounded-xl border border-slate-700/80 mb-4">
+      <!-- Realtime Messages go here -->
+    </div>
+
+    <!-- Chat input & 50MB upload -->
+    <div class="bg-slate-800 p-3 rounded-xl border border-slate-700 flex flex-col gap-2">
+      <div id="filePreview" class="hidden flex items-center justify-between bg-slate-700 px-3 py-1.5 rounded text-xs text-emerald-400">
+        <span id="previewName"></span>
+        <button onclick="clearSelectedFile()" class="text-rose-400 hover:underline">Remove</button>
+      </div>
+      <form id="chatForm" onsubmit="sendMessage(event)" class="flex items-center gap-2">
+        <label title="Upload Photo/Video (Max 50MB)" class="cursor-pointer bg-slate-700 hover:bg-slate-600 p-2.5 rounded-lg text-slate-300 transition">
+          📎
+          <input type="file" id="mediaInput" accept="image/*,video/*" onchange="handleFileSelect(event)" class="hidden">
+        </label>
+        <input type="text" id="messageInput" placeholder="Type a message..." class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500">
+        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 px-5 py-2.5 font-semibold rounded-lg transition">Send</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- SCREEN 3: ADMIN PANEL (Admin Only) -->
+  <main id="adminView" class="hidden flex-1 max-w-3xl w-full mx-auto p-6 space-y-6">
+    <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-md">
+      <h2 class="text-lg font-bold text-white mb-4">Create New User (Assign ID & Password)</h2>
+      <form id="createUserForm" onsubmit="handleCreateUser(event)" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input type="text" id="newUsername" placeholder="Enter Username / ID" required class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white">
+        <input type="text" id="newPassword" placeholder="Set Password" required class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white">
+        <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 font-semibold rounded-lg px-4 py-2 transition">Add User</button>
+      </form>
+      <p id="adminStatusMsg" class="text-xs mt-2 hidden"></p>
+    </div>
+
+    <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-md">
+      <h2 class="text-lg font-bold text-white mb-4">Authorized Users</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-300">
+          <thead class="text-xs uppercase bg-slate-700/60 text-slate-400">
+            <tr>
+              <th class="p-3">Username</th>
+              <th class="p-3">Created At</th>
+              <th class="p-3 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody id="userTableBody" class="divide-y divide-slate-700"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- CLIENT SCRIPT -->
+  <script>
+    let currentUser = null;
+    let socket = null;
+    let selectedFile = null;
+
+    // Check login state on initial load
+    async function init() {
+      const res = await fetch('/api/me');
+      const data = await res.json();
+      if (data.loggedIn) {
+        setupUser(data.user);
+      } else {
+        switchView('login');
+      }
+    }
+
+    function switchView(view) {
+      document.getElementById('loginView').classList.add('hidden');
+      document.getElementById('chatView').classList.add('hidden');
+      document.getElementById('adminView').classList.add('hidden');
+
+      if (view === 'login') {
+        document.getElementById('loginView').classList.remove('hidden');
+        document.getElementById('navRight').classList.add('hidden');
+      } else if (view === 'chat') {
+        document.getElementById('chatView').classList.remove('hidden');
+        document.getElementById('navRight').classList.remove('hidden');
+        if (currentUser.role === 'admin') {
+          document.getElementById('adminTabBtn').classList.remove('hidden');
+          document.getElementById('chatTabBtn').classList.add('hidden');
+        }
+      } else if (view === 'admin') {
+        document.getElementById('adminView').classList.remove('hidden');
+        document.getElementById('adminTabBtn').classList.add('hidden');
+        document.getElementById('chatTabBtn').classList.remove('hidden');
+        loadAdminUsers();
+      }
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const username = document.getElementById('loginUsername').value;
+      const password = document.getElementById('loginPassword').value;
+      const errBox = document.getElementById('loginError');
+
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        errBox.classList.add('hidden');
+        setupUser({ username: data.username, role: data.role });
+      } else {
+        errBox.innerText = data.error || 'Login failed';
+        errBox.classList.remove('hidden');
+      }
+    }
+
+    function setupUser(user) {
+      currentUser = user;
+      document.getElementById('badgeUser').innerText = `${user.username} (${user.role.toUpperCase()})`;
+      switchView('chat');
+      connectSocket();
+    }
+
+    function connectSocket() {
+      if (socket) return;
+      socket = io();
+      socket.on('new_message', (msg) => {
+        renderMessage(msg);
+      });
+    }
+
+    function renderMessage(msg) {
+      const container = document.getElementById('chatMessages');
+      const isMe = msg.sender === currentUser.username;
+
+      const div = document.createElement('div');
+      div.className = `flex flex-col ${isMe ? 'items-end' : 'items-start'}`;
+
+      let mediaHtml = '';
+      if (msg.mediaUrl) {
+        if (msg.mediaType === 'photo') {
+          mediaHtml = `<img src="${msg.mediaUrl}" class="max-w-xs md:max-w-sm rounded-lg mt-2 cursor-pointer" onclick="window.open('${msg.mediaUrl}')"/>`;
+        } else if (msg.mediaType === 'video') {
+          mediaHtml = `<video controls class="max-w-xs md:max-w-sm rounded-lg mt-2"><source src="${msg.mediaUrl}"></video>`;
+        }
+      }
+
+      div.innerHTML = `
+        <div class="text-xs text-slate-400 mb-1 px-1">
+          <span class="${msg.role === 'admin' ? 'text-amber-400 font-semibold' : ''}">${msg.sender}</span> • ${msg.time}
+        </div>
+        <div class="px-4 py-2.5 rounded-2xl max-w-md ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-slate-700 text-slate-100 rounded-tl-none'} shadow">
+          ${msg.text ? `<p class="break-words">${msg.text}</p>` : ''}
+          ${mediaHtml}
+        </div>
+      `;
+
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function handleFileSelect(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 50 * 1024 * 1024) {
+        alert("File size exceeds 50MB limit!");
+        e.target.value = '';
+        return;
+      }
+      selectedFile = file;
+      document.getElementById('previewName').innerText = `Selected: ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)}MB)`;
+      document.getElementById('filePreview').classList.remove('hidden');
+    }
+
+    function clearSelectedFile() {
+      selectedFile = null;
+      document.getElementById('mediaInput').value = '';
+      document.getElementById('filePreview').classList.add('hidden');
+    }
+
+    async function sendMessage(e) {
+      e.preventDefault();
+      const input = document.getElementById('messageInput');
+      const text = input.value.trim();
+
+      if (!text && !selectedFile) return;
+
+      let mediaUrl = null;
+      let mediaType = null;
+
+      if (selectedFile) {
+        const formData = new FormData();
+        formData.append('media', selectedFile);
+        
+        try {
+          const res = await fetch('/api/upload', { method: 'POST', body: formData });
+          const data = await res.json();
+          if (data.url) {
+            mediaUrl = data.url;
+            mediaType = data.type;
+          }
+        } catch (err) {
+          alert("File upload failed!");
+          return;
+        }
+      }
+
+      socket.emit('chat_message', { text, mediaUrl, mediaType });
+      input.value = '';
+      clearSelectedFile();
+    }
+
+    // --- Admin Functions ---
+    async function loadAdminUsers() {
+      const res = await fetch('/api/admin/users');
+      const users = await res.json();
+      const tbody = document.getElementById('userTableBody');
+      tbody.innerHTML = '';
+      
+      users.forEach(u => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-700/30";
+        tr.innerHTML = `
+          <td class="p-3 font-medium">${u.username}</td>
+          <td class="p-3 text-slate-400">${new Date(u.createdAt).toLocaleDateString()}</td>
+          <td class="p-3 text-right">
+            <button onclick="deleteUser('${u.username}')" class="text-rose-400 hover:text-rose-300 text-xs">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function handleCreateUser(e) {
+      e.preventDefault();
+      const username = document.getElementById('newUsername').value;
+      const password = document.getElementById('newPassword').value;
+      const statusMsg = document.getElementById('adminStatusMsg');
+
+      const res = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await res.json();
+      statusMsg.classList.remove('hidden');
+      if (data.success) {
+        statusMsg.className = "text-xs mt-2 text-emerald-400";
+        statusMsg.innerText = data.message;
+        document.getElementById('createUserForm').reset();
+        loadAdminUsers();
+      } else {
+        statusMsg.className = "text-xs mt-2 text-rose-400";
+        statusMsg.innerText = data.error;
+      }
+    }
+
+    async function deleteUser(username) {
+      if (!confirm(`Are you sure you want to remove ${username}?`)) return;
+      await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      loadAdminUsers();
+    }
+
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' });
+      window.location.reload();
+    }
+
+    init();
+  </script>
+</body>
+</html>
